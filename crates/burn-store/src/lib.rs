@@ -91,6 +91,10 @@ pub use filter::PathFilter;
 pub use tensor_snapshot::{TensorSnapshot, TensorSnapshotError};
 pub use traits::{ModuleSnapshot, ModuleStore};
 
+pub(crate) mod prelude {
+    
+}
+
 #[cfg(feature = "std")]
 mod keyremapper;
 #[cfg(feature = "std")]
@@ -105,6 +109,11 @@ pub use pytorch::{PytorchStore, PytorchStoreError};
 mod safetensors;
 #[cfg(feature = "safetensors")]
 pub use safetensors::{SafetensorsStore, SafetensorsStoreError};
+
+#[cfg(feature = "bintensors")]
+mod bintensors;
+#[cfg(feature = "bintensors")]
+pub use bintensors::{BintensorsStore, BintensorsStoreError};
 
 #[cfg(feature = "burnpack")]
 mod burnpack;

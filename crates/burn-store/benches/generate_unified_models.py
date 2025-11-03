@@ -23,6 +23,8 @@ import os
 from pathlib import Path
 import tempfile
 from safetensors.torch import save_file
+from bintensors.torch import save_file as save_file_bt
+
 
 def get_temp_dir():
     """Get the appropriate temp directory."""
@@ -30,8 +32,10 @@ def get_temp_dir():
     temp_dir.mkdir(parents=True, exist_ok=True)
     return temp_dir
 
+
 class LargeModel(nn.Module):
     """Large model with 20 layers to match Rust benchmark."""
+
     def __init__(self):
         super().__init__()
         self.layers = nn.ModuleList()
@@ -49,11 +53,13 @@ class LargeModel(nn.Module):
             x = layer(x)
         return x
 
+
 def calculate_model_size(model):
     """Calculate the size of the model in MB."""
     total_params = sum(p.numel() for p in model.parameters())
     size_mb = (total_params * 4) / (1024 * 1024)  # 4 bytes per float32
     return total_params, size_mb
+
 
 def initialize_weights(model):
     """Initialize model weights with random values."""
@@ -63,21 +69,23 @@ def initialize_weights(model):
         else:
             nn.init.zeros_(param)
 
+
 def save_pytorch_format(model, output_dir):
     """Save model in PyTorch format."""
     pt_path = output_dir / "large_model.pt"
 
     # Save as checkpoint with model_state_dict (common format)
     checkpoint = {
-        'model_state_dict': model.state_dict(),
-        'metadata': {
-            'model_type': 'large_benchmark_model',
-            'num_layers': len(model.layers),
-        }
+        "model_state_dict": model.state_dict(),
+        "metadata": {
+            "model_type": "large_benchmark_model",
+            "num_layers": len(model.layers),
+        },
     }
     torch.save(checkpoint, pt_path)
 
     return pt_path
+
 
 def save_safetensors_format(model, output_dir):
     """Save model in SafeTensors format."""
@@ -90,31 +98,58 @@ def save_safetensors_format(model, output_dir):
 
     # Save with metadata
     metadata = {
-        'model_type': 'large_benchmark_model',
-        'num_layers': str(len(model.layers)),
+        "model_type": "large_benchmark_model",
+        "num_layers": str(len(model.layers)),
     }
     save_file(state_dict, st_path, metadata=metadata)
 
     return st_path
 
-def verify_files(pt_path, st_path):
+
+def save_bintensors_format(model, output_dir):
+    """Save model in SafeTensors format."""
+    st_path = output_dir / "large_model.bt"
+
+    # Convert state dict to safetensors format
+    state_dict = model.state_dict()
+    # Ensure all tensors are contiguous and on CPU
+    state_dict = {k: v.contiguous().cpu() for k, v in state_dict.items()}
+
+    # Save with metadata
+    metadata = {
+        "model_type": "large_benchmark_model",
+        "num_layers": str(len(model.layers)),
+    }
+    save_file_bt(state_dict, st_path, metadata=metadata)
+
+    return st_path
+
+
+def verify_files(pt_path, st_path, bt_path):
     """Verify the saved files can be loaded."""
     # Verify PyTorch file
-    checkpoint = torch.load(pt_path, map_location='cpu')
-    pt_keys = set(checkpoint['model_state_dict'].keys())
+    checkpoint = torch.load(pt_path, map_location="cpu")
+    pt_keys = set(checkpoint["model_state_dict"].keys())
     print(f"  PyTorch file: {len(pt_keys)} tensors")
 
     # Verify SafeTensors file
     from safetensors import safe_open
+    from bintensors import safe_open as safe_open_bt
+
     with safe_open(st_path, framework="pt", device="cpu") as f:
         st_keys = set(f.keys())
         print(f"  SafeTensors file: {len(st_keys)} tensors")
+
+    with safe_open_bt(bt_path, framework="pt", device="cpu") as f:
+        bt_keys = set(f.keys())
+        print(f"  SafeTensors file: {len(bt_keys)} tensors")
 
     # Check keys match
     if pt_keys != st_keys:
         print("  ⚠️ Warning: Keys don't match between formats!")
     else:
         print("  ✓ Keys match between formats")
+
 
 def main():
     print("🔧 Generating unified benchmark model files...")
@@ -157,9 +192,17 @@ def main():
     print(f"  File size: {st_size_mb:.2f} MB")
     print("")
 
+    # Save in BinTensors format
+    print("💾 Saving BinTensors format...")
+    bt_path = save_bintensors_format(model, output_dir)
+    bt_size_mb = bt_path.stat().st_size / (1024 * 1024)
+    print(f"  Saved: {bt_path}")
+    print(f"  File size: {bt_size_mb:.2f} MB")
+    print("")
+
     # Verify files
     print("🔍 Verifying saved files...")
-    verify_files(pt_path, st_path)
+    verify_files(pt_path, st_path, bt_path)
     print("")
 
     print(f"✅ Model files generated successfully!")
@@ -170,6 +213,7 @@ def main():
     print("")
     print("💡 To run the unified benchmark:")
     print("   cargo bench --bench unified_loading")
+
 
 if __name__ == "__main__":
     main()

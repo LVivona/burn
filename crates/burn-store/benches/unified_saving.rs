@@ -20,7 +20,7 @@ use burn_core::module::Module;
 use burn_core::prelude::*;
 use burn_core::record::{FullPrecisionSettings, NamedMpkFileRecorder};
 use burn_nn as nn;
-use burn_store::{BurnpackStore, ModuleSnapshot, SafetensorsStore};
+use burn_store::{BintensorsStore, BurnpackStore, ModuleSnapshot, SafetensorsStore};
 use divan::{AllocProfiler, Bencher};
 use std::fs;
 use std::path::PathBuf;
@@ -90,6 +90,7 @@ fn main() {
             println!("  1. BurnpackStore (new native format)");
             println!("  2. NamedMpkFileRecorder (old native format)");
             println!("  3. SafetensorsStore (new)");
+            println!("  4. BintensorsStore (new)");
             println!();
             println!("Available backends:");
             println!("  - NdArray (CPU)");
@@ -164,6 +165,21 @@ macro_rules! bench_backend {
                     model
                         .save_into(&mut store)
                         .expect("Failed to save with SafetensorsStore");
+                    // Clean up
+                    let _ = fs::remove_file(output_path);
+                });
+            }
+
+            #[divan::bench]
+            fn bintensors_store(bencher: Bencher) {
+                bencher.bench(|| {
+                    let device: TestDevice = Default::default();
+                    let model = LargeModel::<TestBackend>::new(&device);
+                    let output_path = get_output_dir().join("test_bintensors_store.bintensors");
+                    let mut store = BintensorsStore::from_file(output_path.clone());
+                    model
+                        .save_into(&mut store)
+                        .expect("Failed to save with BintensorsStore");
                     // Clean up
                     let _ = fs::remove_file(output_path);
                 });

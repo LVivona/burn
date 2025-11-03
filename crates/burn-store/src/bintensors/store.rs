@@ -1,4 +1,4 @@
-//! SafeTensors store implementation using the official safetensors crate.
+//! BinTensors store implementation using the official bintensors crate.
 
 use crate::{
     ApplyResult, IdentityAdapter, ModuleAdapter, ModuleSnapshot, ModuleStore, PathFilter,
@@ -27,11 +27,11 @@ use alloc::sync::Arc;
 #[cfg(not(target_has_atomic = "ptr"))]
 type Arc<T> = Box<T>;
 
-/// Errors that can occur during SafeTensors operations.
+/// Errors that can occur during BinTensors operations.
 #[derive(Debug)]
-pub enum SafetensorsStoreError {
-    /// SafeTensors crate error.
-    Safetensors(safetensors::SafeTensorError),
+pub enum BintensorsStoreError {
+    /// BinTensors crate error.
+    Bintensors(bintensors::BinTensorError),
 
     /// I/O error.
     #[cfg(feature = "std")]
@@ -47,10 +47,10 @@ pub enum SafetensorsStoreError {
     Other(String),
 }
 
-impl fmt::Display for SafetensorsStoreError {
+impl fmt::Display for BintensorsStoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Safetensors(e) => write!(f, "SafeTensors error: {}", e),
+            Self::Bintensors(e) => write!(f, "BinTensors error: {}", e),
             #[cfg(feature = "std")]
             Self::Io(e) => write!(f, "I/O error: {}", e),
             Self::TensorNotFound(name) => write!(f, "Tensor not found: {}", name),
@@ -60,50 +60,47 @@ impl fmt::Display for SafetensorsStoreError {
     }
 }
 
-impl core::error::Error for SafetensorsStoreError {}
+impl core::error::Error for BintensorsStoreError {}
 
-impl From<safetensors::SafeTensorError> for SafetensorsStoreError {
-    fn from(e: safetensors::SafeTensorError) -> Self {
-        SafetensorsStoreError::Safetensors(e)
+impl From<std::io::Error> for BintensorsStoreError {
+    fn from(value: std::io::Error) -> Self {
+        BintensorsStoreError::Io(value)
     }
 }
 
-#[cfg(feature = "std")]
-impl From<std::io::Error> for SafetensorsStoreError {
-    fn from(e: std::io::Error) -> Self {
-        SafetensorsStoreError::Io(e)
+impl From<bintensors::BinTensorError> for BintensorsStoreError {
+    fn from(value: bintensors::BinTensorError) -> Self {
+        BintensorsStoreError::Bintensors(value)
     }
 }
 
-/// SafeTensors store supporting both file and memory storage.
-pub enum SafetensorsStore {
-    /// File-based storage.
+pub enum BintensorsStore {
+    /// File based storage.
     #[cfg(feature = "std")]
     File(FileStore),
 
-    /// Memory-based storage.
+    /// Memory based storage.
     Memory(MemoryStore),
 }
 
-impl Default for SafetensorsStore {
-    /// Create a default memory-based store.
+impl Default for BintensorsStore {
     fn default() -> Self {
         Self::from_bytes(None)
     }
 }
 
-impl SafetensorsStore {
-    /// Get the default metadata that includes Burn framework information.
+impl BintensorsStore {
+    /// Get the default metadata that includes the Burn framework meta-info.
     ///
     /// Includes:
-    /// - `format`: "safetensors"
-    /// - `producer`: "burn"
-    /// - `version`: The version of burn-store crate (from CARGO_PKG_VERSION)
+    /// - `format` : "bintensors",
+    /// - `producer` : "burn",
+    /// - `version`  : The version of burn-store crate (from CARGO_PKG_VERSION)
     ///
     /// These metadata fields are automatically added to all saved models.
     pub fn default_metadata() -> HashMap<String, String> {
         let mut metadata = HashMap::new();
-        metadata.insert("format".to_string(), "safetensors".to_string());
+        metadata.insert("format".to_string(), "bintensors".to_string());
         metadata.insert("producer".to_string(), "burn".to_string());
         metadata.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
         metadata
@@ -415,16 +412,16 @@ impl SafetensorsStore {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_bytes(&self) -> Result<Vec<u8>, SafetensorsStoreError> {
+    pub fn get_bytes(&self) -> Result<Vec<u8>, BintensorsStoreError> {
         match self {
             #[cfg(feature = "std")]
-            Self::File(_) => Err(SafetensorsStoreError::Other(
+            Self::File(_) => Err(BintensorsStoreError::Other(
                 "Cannot get bytes from file-based store".to_string(),
             )),
             Self::Memory(p) => p
                 .data()
                 .map(|arc| arc.as_ref().clone())
-                .ok_or_else(|| SafetensorsStoreError::Other("No data available".to_string())),
+                .ok_or_else(|| BintensorsStoreError::Other("No data available".to_string())),
         }
     }
 }
@@ -482,20 +479,15 @@ impl MemoryStore {
     fn data(&self) -> Option<Arc<Vec<u8>>> {
         self.data.clone()
     }
-
-    #[cfg(test)]
-    pub(crate) fn set_data(&mut self, data: Vec<u8>) {
-        self.data = Some(Arc::new(data));
-    }
 }
 
 // Adapter to use TensorSnapshot directly with safetensors
 struct TensorSnapshotAdapter(TensorSnapshot);
 
-impl safetensors::View for TensorSnapshotAdapter {
-    fn dtype(&self) -> safetensors::Dtype {
+impl bintensors::View for TensorSnapshotAdapter {
+    fn dtype(&self) -> bintensors::Dtype {
         // Convert from burn dtype to safetensors dtype
-        dtype_to_safetensors(self.0.dtype).unwrap_or(safetensors::Dtype::F32)
+        dtype_to_bintensors(self.0.dtype).unwrap_or(bintensors::Dtype::F32)
     }
 
     fn shape(&self) -> &[usize] {
@@ -517,8 +509,8 @@ impl safetensors::View for TensorSnapshotAdapter {
     }
 }
 
-impl ModuleStore for SafetensorsStore {
-    type Error = SafetensorsStoreError;
+impl ModuleStore for BintensorsStore {
+    type Error = BintensorsStoreError;
 
     fn collect_from<B: Backend, M: ModuleSnapshot<B>>(
         &mut self,
@@ -557,29 +549,29 @@ impl ModuleStore for SafetensorsStore {
             Self::File(p) => {
                 // Check if file exists and overwrite is disabled
                 if p.path.exists() && !p.overwrite {
-                    return Err(SafetensorsStoreError::Other(format!(
+                    return Err(BintensorsStoreError::Other(format!(
                         "File already exists: {}. Use .overwrite(true) to overwrite.",
                         p.path.display()
                     )));
                 }
 
                 // Convert to safetensors format
-                let tensors = snapshots_to_safetensors(snapshots)?;
+                let tensors = snapshots_to_bintensors(snapshots)?;
 
                 // Use serialize_to_file which streams directly to disk
                 // This calls the lazy closures on-demand without buffering everything
-                safetensors::serialize_to_file(tensors, Some(std_metadata), &p.path)?;
+                bintensors::serialize_to_file(tensors, &Some(std_metadata), &p.path)?;
                 Ok(())
             }
             Self::Memory(p) => {
                 // For memory, we need to serialize to bytes
-                let tensors = snapshots_to_safetensors(snapshots)?;
+                let tensors = snapshots_to_bintensors(snapshots)?;
                 // For no-std, serialize still needs std HashMap when std feature is enabled
                 #[cfg(feature = "std")]
-                let data = safetensors::serialize(tensors, Some(std_metadata))?;
+                let data = bintensors::serialize(tensors, &Some(std_metadata))?;
 
                 #[cfg(not(feature = "std"))]
-                let data = safetensors::serialize(tensors, Some(metadata))?;
+                let data = bintensors::serialize(tensors, Some(metadata))?;
                 p.data = Some(Arc::new(data));
                 Ok(())
             }
@@ -596,14 +588,14 @@ impl ModuleStore for SafetensorsStore {
             #[cfg(feature = "std")]
             Self::File(p) => {
                 // Use safetensors' built-in lazy loading mechanisms
-                safetensors_to_snapshots_lazy_file(&p.path)?
+                bintensors_to_snapshots_lazy_file(&p.path)?
             }
             Self::Memory(p) => {
                 let data_arc = p
                     .data
                     .clone()
-                    .ok_or_else(|| SafetensorsStoreError::Other("No data loaded".to_string()))?;
-                safetensors_to_snapshots_lazy(data_arc)?
+                    .ok_or_else(|| BintensorsStoreError::Other("No data loaded".to_string()))?;
+                bintensors_to_snapshots_lazy(data_arc)?
             }
         };
 
@@ -629,14 +621,14 @@ impl ModuleStore for SafetensorsStore {
 
         // Validate if needed
         if self.get_validate() && !result.errors.is_empty() {
-            return Err(SafetensorsStoreError::ValidationFailed(format!(
+            return Err(BintensorsStoreError::ValidationFailed(format!(
                 "Import errors: {:?}",
                 result.errors
             )));
         }
 
         if !self.get_allow_partial() && !result.missing.is_empty() {
-            return Err(SafetensorsStoreError::TensorNotFound(format!(
+            return Err(BintensorsStoreError::TensorNotFound(format!(
                 "Missing tensors: {:?}",
                 result.missing
             )));
@@ -646,7 +638,7 @@ impl ModuleStore for SafetensorsStore {
     }
 }
 
-impl SafetensorsStore {
+impl BintensorsStore {
     fn get_filter(&self) -> &PathFilter {
         match self {
             #[cfg(feature = "std")]
@@ -714,9 +706,9 @@ fn apply_remapping(snapshots: Vec<TensorSnapshot>, remapper: &KeyRemapper) -> Ve
 }
 
 /// Convert TensorSnapshots to safetensors format lazily.
-fn snapshots_to_safetensors(
+fn snapshots_to_bintensors(
     snapshots: Vec<TensorSnapshot>,
-) -> Result<Vec<(String, TensorSnapshotAdapter)>, SafetensorsStoreError> {
+) -> Result<Vec<(String, TensorSnapshotAdapter)>, BintensorsStoreError> {
     let mut tensors = Vec::new();
 
     for snapshot in snapshots {
@@ -728,29 +720,34 @@ fn snapshots_to_safetensors(
     Ok(tensors)
 }
 
-/// Convert safetensors to TensorSnapshots with lazy loading.
-fn safetensors_to_snapshots_lazy(
+fn bintensors_to_snapshots_lazy(
     data_arc: Arc<Vec<u8>>,
-) -> Result<Vec<TensorSnapshot>, SafetensorsStoreError> {
+) -> Result<Vec<TensorSnapshot>, BintensorsStoreError> {
     // Parse to get metadata
-    let tensors = safetensors::SafeTensors::deserialize(&data_arc)?;
+    let tensors = bintensors::BinTensors::deserialize(&data_arc)?;
     let mut snapshots = Vec::new();
 
     for (name, tensor_snapshot) in tensors.tensors() {
         // Extract metadata without materializing data
-        let dtype = safetensor_dtype_to_burn(tensor_snapshot.dtype())?;
+        let dtype = bintensors_dtype_to_burn(tensor_snapshot.dtype())?;
         let shape = tensor_snapshot.shape().to_vec();
         let path_parts: Vec<String> = name.split('.').map(|s| s.to_string()).collect();
 
         // Create a lazy closure that will deserialize only this tensor when needed
-        #[cfg(target_has_atomic = "ptr")]
-        let data_clone = Arc::clone(&data_arc);
-        #[cfg(not(target_has_atomic = "ptr"))]
-        let data_clone = data_arc.clone();
+
+        let data_clone = {
+            #[cfg(target_has_atomic = "ptr")]
+            {
+                Arc::clone(&data_arc)
+            }
+            #[cfg(not(target_has_atomic = "ptr"))]
+            data_arc.clone()
+        };
+
         let name_clone = name.to_string();
         let data_fn = alloc::rc::Rc::new(move || {
             // Re-deserialize when needed (this is cheap, just parsing header)
-            let tensors = safetensors::SafeTensors::deserialize(&data_clone).map_err(|e| {
+            let tensors = bintensors::BinTensors::deserialize(&data_clone).map_err(|e| {
                 crate::TensorSnapshotError::IoError(format!(
                     "Failed to re-deserialize safetensors: {}",
                     e
@@ -770,7 +767,7 @@ fn safetensors_to_snapshots_lazy(
             Ok(TensorData {
                 bytes,
                 shape: tensor.shape().to_vec(),
-                dtype: safetensor_dtype_to_burn(tensor.dtype())
+                dtype: bintensors_dtype_to_burn(tensor.dtype())
                     .map_err(|_| crate::TensorSnapshotError::DataError("Invalid dtype".into()))?,
             })
         });
@@ -792,9 +789,9 @@ fn safetensors_to_snapshots_lazy(
 /// Convert safetensors to TensorSnapshots with true on-demand loading from file.
 /// This reads only the header initially, then loads tensor data on demand.
 #[cfg(feature = "std")]
-fn safetensors_to_snapshots_lazy_file(
+fn bintensors_to_snapshots_lazy_file(
     path: &std::path::Path,
-) -> Result<Vec<TensorSnapshot>, SafetensorsStoreError> {
+) -> Result<Vec<TensorSnapshot>, BintensorsStoreError> {
     // Always use memory mapping for the most efficient access
     use memmap2::MmapOptions;
 
@@ -804,11 +801,11 @@ fn safetensors_to_snapshots_lazy_file(
     let mmap_arc = Arc::new(mmap);
 
     // Parse just to get metadata (safetensors won't copy data with mmap)
-    let tensors = safetensors::SafeTensors::deserialize(&mmap_arc)?;
+    let tensors = bintensors::BinTensors::deserialize(&mmap_arc)?;
     let mut snapshots = Vec::new();
 
     for (name, tensor_snapshot) in tensors.tensors() {
-        let dtype = safetensor_dtype_to_burn(tensor_snapshot.dtype())?;
+        let dtype = bintensors_dtype_to_burn(tensor_snapshot.dtype())?;
         let shape = tensor_snapshot.shape().to_vec();
         let path_parts: Vec<String> = name.split('.').map(|s| s.to_string()).collect();
 
@@ -818,7 +815,7 @@ fn safetensors_to_snapshots_lazy_file(
 
         let data_fn = alloc::rc::Rc::new(move || {
             // Re-parse to get the tensor snapshot (this is cheap with mmap)
-            let tensors = safetensors::SafeTensors::deserialize(&mmap_clone).map_err(|e| {
+            let tensors = bintensors::BinTensors::deserialize(&mmap_clone).map_err(|e| {
                 crate::TensorSnapshotError::IoError(format!("Failed to deserialize: {}", e))
             })?;
             let tensor = tensors.tensor(&name_clone).map_err(|e| {
@@ -832,7 +829,7 @@ fn safetensors_to_snapshots_lazy_file(
             Ok(TensorData {
                 bytes: burn_tensor::Bytes::from_bytes_vec(tensor.data().to_vec()),
                 shape: tensor.shape().to_vec(),
-                dtype: safetensor_dtype_to_burn(tensor.dtype())
+                dtype: bintensors_dtype_to_burn(tensor.dtype())
                     .map_err(|_| crate::TensorSnapshotError::DataError("Invalid dtype".into()))?,
             })
         });
@@ -852,8 +849,8 @@ fn safetensors_to_snapshots_lazy_file(
 }
 
 /// Helper to convert safetensors Dtype to burn DType.
-fn safetensor_dtype_to_burn(dtype: safetensors::Dtype) -> Result<DType, SafetensorsStoreError> {
-    use safetensors::Dtype;
+fn bintensors_dtype_to_burn(dtype: bintensors::Dtype) -> Result<DType, BintensorsStoreError> {
+    use bintensors::Dtype;
 
     match dtype {
         Dtype::F64 => Ok(DType::F64),
@@ -868,7 +865,7 @@ fn safetensor_dtype_to_burn(dtype: safetensors::Dtype) -> Result<DType, Safetens
         Dtype::U32 => Ok(DType::U32),
         Dtype::U8 => Ok(DType::U8),
         Dtype::BOOL => Ok(DType::Bool),
-        _ => Err(SafetensorsStoreError::Other(format!(
+        _ => Err(BintensorsStoreError::Other(format!(
             "Unsupported dtype: {:?}",
             dtype
         ))),
@@ -876,8 +873,8 @@ fn safetensor_dtype_to_burn(dtype: safetensors::Dtype) -> Result<DType, Safetens
 }
 
 /// Helper to convert DType to safetensors Dtype.
-fn dtype_to_safetensors(dtype: DType) -> Result<safetensors::Dtype, SafetensorsStoreError> {
-    use safetensors::Dtype;
+fn dtype_to_bintensors(dtype: DType) -> Result<bintensors::Dtype, BintensorsStoreError> {
+    use bintensors::Dtype;
 
     match dtype {
         DType::F64 => Ok(Dtype::F64),
@@ -890,12 +887,12 @@ fn dtype_to_safetensors(dtype: DType) -> Result<safetensors::Dtype, SafetensorsS
         DType::I8 => Ok(Dtype::I8),
         DType::U64 => Ok(Dtype::U64),
         DType::U32 => Ok(Dtype::U32),
-        DType::U16 => Err(SafetensorsStoreError::Other(
+        DType::U16 => Err(BintensorsStoreError::Other(
             "U16 dtype not yet supported in safetensors".to_string(),
         )),
         DType::U8 => Ok(Dtype::U8),
         DType::Bool => Ok(Dtype::BOOL),
-        DType::QFloat(_) => Err(SafetensorsStoreError::Other(
+        DType::QFloat(_) => Err(BintensorsStoreError::Other(
             "Quantized tensors not yet supported in safetensors".to_string(),
         )),
     }

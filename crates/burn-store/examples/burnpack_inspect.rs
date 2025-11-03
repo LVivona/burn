@@ -71,7 +71,7 @@ fn main() {
     println!("  ┌─────────────────────────────────────┐");
     println!("  │ Header (10 bytes)                   │");
     println!("  ├─────────────────────────────────────┤");
-    println!("  │ - Magic: 0x4E525542 (BURN in LE)   │");
+    println!("  │ - Magic: 0x4E525542 (BURN in LE)    │");
     println!("  │ - Version: 0x0001 (2 bytes)         │");
     println!("  │ - Metadata size: (4 bytes, u32 LE)  │");
     println!("  ├─────────────────────────────────────┤");

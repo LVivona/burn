@@ -28,7 +28,8 @@ use burn_core::record::{FullPrecisionSettings, NamedMpkFileRecorder, Recorder};
 // use burn_import::safetensors::SafetensorsFileRecorder;
 use burn_nn as nn;
 use burn_store::{
-    BurnpackStore, ModuleSnapshot, PyTorchToBurnAdapter, PytorchStore, SafetensorsStore,
+    BintensorsStore, BurnpackStore, ModuleSnapshot, PyTorchToBurnAdapter, PytorchStore,
+    SafetensorsStore,
 };
 use divan::{AllocProfiler, Bencher};
 use std::fs;
@@ -110,22 +111,23 @@ fn generate_burn_formats(st_path: &Path, bp_path: &Path, mpk_path: &Path) {
 }
 
 /// Get paths to the model files
-fn get_model_paths() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+fn get_model_paths() -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
     let dir = get_model_dir();
     (
         dir.join("large_model.bpk"),
         dir.join("large_model.mpk"),
         dir.join("large_model.safetensors"),
         dir.join("large_model.pt"),
+        dir.join("large_model.bt"),
     )
 }
 
 /// Check if model files exist
 fn check_model_files() -> Result<(), String> {
-    let (_, _, st_path, pt_path) = get_model_paths();
+    let (_, _, st_path, pt_path, bt_path) = get_model_paths();
 
     // For now, only check safetensors and pytorch files (will generate burnpack/mpk later)
-    if !st_path.exists() || !pt_path.exists() {
+    if !st_path.exists() || !pt_path.exists() || !bt_path.exists() {
         return Err(format!(
             "\n❌ Model files not found!\n\
             \n\
@@ -149,7 +151,7 @@ fn main() {
     // Check if model files exist before running benchmarks
     match check_model_files() {
         Ok(()) => {
-            let (bp_path, mpk_path, st_path, pt_path) = get_model_paths();
+            let (bp_path, mpk_path, st_path, pt_path, bt_path) = get_model_paths();
 
             // First, generate Burnpack and MPK files if they don't exist
             if !bp_path.exists() || !mpk_path.exists() {
@@ -185,6 +187,7 @@ fn main() {
             println!("  4. SafetensorsFileRecorder (old)");
             println!("  5. PytorchStore (new)");
             println!("  6. PyTorchFileRecorder (old)");
+            println!("  7. BintensorsStore (new)");
             println!();
             println!("Available backends:");
             println!("  - NdArray (CPU)");
@@ -221,7 +224,7 @@ macro_rules! bench_backend {
 
             #[divan::bench]
             fn burnpack_store(bencher: Bencher) {
-                let (bp_path, _, _, _) = get_model_paths();
+                let (bp_path, _, _, _, _) = get_model_paths();
                 let file_size = fs::metadata(&bp_path).unwrap().len();
 
                 bencher
@@ -236,7 +239,7 @@ macro_rules! bench_backend {
 
             #[divan::bench]
             fn namedmpk_recorder(bencher: Bencher) {
-                let (_, mpk_path, _, _) = get_model_paths();
+                let (_, mpk_path, _, _, _) = get_model_paths();
                 let file_size = fs::metadata(&mpk_path).unwrap().len();
 
                 bencher
@@ -253,7 +256,7 @@ macro_rules! bench_backend {
 
             #[divan::bench]
             fn safetensors_store(bencher: Bencher) {
-                let (_, _, st_path, _) = get_model_paths();
+                let (_, _, st_path, _, _) = get_model_paths();
                 let file_size = fs::metadata(&st_path).unwrap().len();
 
                 bencher
@@ -286,7 +289,7 @@ macro_rules! bench_backend {
 
             #[divan::bench]
             fn pytorch_store(bencher: Bencher) {
-                let (_, _, _, pt_path) = get_model_paths();
+                let (_, _, _, pt_path, _) = get_model_paths();
                 let file_size = fs::metadata(&pt_path).unwrap().len();
 
                 bencher
@@ -297,6 +300,22 @@ macro_rules! bench_backend {
                         let mut store = PytorchStore::from_file(pt_path.clone())
                             .with_top_level_key("model_state_dict")
                             .allow_partial(true);
+                        model.load_from(&mut store).expect("Failed to load");
+                    });
+            }
+
+            #[divan::bench]
+            fn bintensors_store(bencher: Bencher) {
+                let (_, _, _, _, bt_path) = get_model_paths();
+                let file_size = fs::metadata(&bt_path).unwrap().len();
+
+                bencher
+                    .counter(divan::counter::BytesCount::new(file_size))
+                    .bench(|| {
+                        let device: TestDevice = Default::default();
+                        let mut model = LargeModel::<TestBackend>::new(&device);
+                        let mut store = BintensorsStore::from_file(bt_path.clone())
+                            .with_from_adapter(PyTorchToBurnAdapter);
                         model.load_from(&mut store).expect("Failed to load");
                     });
             }
